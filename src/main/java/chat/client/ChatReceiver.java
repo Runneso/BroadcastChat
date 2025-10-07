@@ -30,8 +30,6 @@ public class ChatReceiver {
             while (in.ready()) {
                 String line = in.readLine();
                 if (line == null) {
-                    System.err.println("Connection closed by server.");
-                    running.set(false);
                     return;
                 }
                 BaseMessage message = Json.fromJson(line, BaseMessage.class);
@@ -40,7 +38,7 @@ public class ChatReceiver {
                 }
             }
         } catch (Exception error) {
-            System.err.println("Error in reading message: " + error.getMessage());
+            System.err.println("Error reading message: " + error.getMessage());
         }
     }
 }

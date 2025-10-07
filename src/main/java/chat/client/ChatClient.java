@@ -5,6 +5,8 @@ import chat.common.utils.Config;
 import chat.common.utils.Connection;
 
 import java.io.*;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.time.Instant;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,8 +52,11 @@ public class ChatClient {
         Supplier<BufferedReader> inSupplier = inRef::get;
         Supplier<PrintWriter> outSupplier = outRef::get;
 
+        InetSocketAddress remote = (InetSocketAddress) this.connection.socket().getRemoteSocketAddress();
+        Supplier<Boolean> reconnectSupplier = () -> reconnect(remote, inRef, outRef);
+
         PrintWriter consoleWriter = new PrintWriter(new OutputStreamWriter(consoleOut, Config.CHARSET),true);
-        ChatSender sender = new ChatSender(queue, outSupplier, running);
+        ChatSender sender = new ChatSender(queue, outSupplier, running, reconnectSupplier);
         ChatReceiver receiver = new ChatReceiver(inSupplier, consoleWriter, running);
 
         producer.submit(sender::run);
@@ -61,6 +66,7 @@ public class ChatClient {
             System.out.println("Welcome to BroadcastChat. Command /quit for exit.");
             while (running.get()) {
                 String line = consoleReader.readLine();
+                if (line == null) break;
                 if (QUIT_COMMAND.equalsIgnoreCase(line.trim())) break;
                 ClientMessage clientMessage = new ClientMessage(userInfo.username(), line, Instant.now().toEpochMilli());
                 consoleWriter.println(clientMessage);
@@ -73,10 +79,33 @@ public class ChatClient {
         }
     }
 
+    private boolean reconnect(InetSocketAddress remote, AtomicReference<BufferedReader> inRef, AtomicReference<PrintWriter> outRef) {
+        System.out.println("No available servers. Retrying in 10 seconds.");
+        try {
+            Connection old = this.connection;
+            if (old != null) {
+                try { old.close(); } catch (Exception ignored) {}
+            }
+            Socket s = new Socket(remote.getHostString(), remote.getPort());
+            s.setTcpNoDelay(true);
+            Connection fresh = Connection.of(s);
+            this.connection = fresh;
+            inRef.set(fresh.getReader());
+            outRef.set(fresh.getWriter());
+            return true;
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
     public void shutdown() {
         if (!running.getAndSet(false)) return;
         producer.shutdownNow();
         consumer.shutdownNow();
+        Connection c = this.connection;
+        if (c != null) {
+            try { c.close(); } catch (Exception ignored) {}
+        }
         System.out.println("Client is stopped.");
     }
 }
