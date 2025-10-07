@@ -9,11 +9,11 @@ public class Main {
     public static void main(String[] args) throws IOException {
         String host = args[0], username = args[2];
         int port = Integer.parseInt(args[1]);
-        ChatClient c = new ChatClient(new UserInfo(username));
+        ChatClient client = new ChatClient(new UserInfo(username));
 
         try(Socket socket = new Socket(host,port)){
-            Connection cc = Connection.of(socket);
-            c.start(cc, System.in, System.out);
+            Connection connection = Connection.of(socket);
+            client.start(connection, System.in, System.out);
         }
     }
 }

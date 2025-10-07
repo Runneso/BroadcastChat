@@ -2,8 +2,6 @@ package chat.common.utils;
 
 import java.io.*;
 import java.net.Socket;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 public final class Connection implements Closeable {
