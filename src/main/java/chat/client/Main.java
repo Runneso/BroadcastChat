@@ -7,9 +7,11 @@ import java.net.Socket;
 
 public class Main {
     public static void main(String[] args) throws IOException {
-        ChatClient c = new ChatClient(new UserInfo("213"));
+        String host = args[0], username = args[2];
+        int port = Integer.parseInt(args[1]);
+        ChatClient c = new ChatClient(new UserInfo(username));
 
-        try(Socket socket = new Socket("0.0.0.0",5000)){
+        try(Socket socket = new Socket(host,port)){
             Connection cc = Connection.of(socket);
             c.start(cc, System.in, System.out);
         }
