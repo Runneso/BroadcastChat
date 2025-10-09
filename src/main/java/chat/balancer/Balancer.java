@@ -220,13 +220,6 @@ public class Balancer implements AutoCloseable {
             }
         }
         upstreamsByServer.clear();
-    }
-
-    public static void main(String[] args) throws IOException {
-        Path cfg = Path.of(args.length > 0 ? args[0] : "config.json");
-        int port = args.length > 1 ? Integer.parseInt(args[1]) : 5000;
-        try (Balancer b = new Balancer(cfg, port)) {
-            b.start();
-        }
+        System.out.println("Balancer is stopped.");
     }
 }

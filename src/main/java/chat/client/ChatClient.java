@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-public class ChatClient {
+public class ChatClient implements AutoCloseable{
     private final static String QUIT_COMMAND = "/quit";
     private final static String CHAT_PRODUCER_THREAD_NAME = "chat-producer";
     private final static String CHAT_CONSUMER_THREAD_NAME = "chat-consumer";
@@ -74,8 +74,6 @@ public class ChatClient {
             }
         } catch (IOException e) {
             System.err.println("Error reading from terminal: " + e.getMessage());
-        } finally {
-            shutdown();
         }
     }
 
@@ -98,7 +96,8 @@ public class ChatClient {
         }
     }
 
-    public void shutdown() {
+    @Override
+    public void close() {
         if (!running.getAndSet(false)) return;
         producer.shutdownNow();
         consumer.shutdownNow();
