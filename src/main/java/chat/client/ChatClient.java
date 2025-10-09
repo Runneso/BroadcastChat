@@ -69,7 +69,6 @@ public class ChatClient implements AutoCloseable{
                 if (line == null) break;
                 if (QUIT_COMMAND.equalsIgnoreCase(line.trim())) break;
                 ClientMessage clientMessage = new ClientMessage(userInfo.username(), line, Instant.now().toEpochMilli());
-                consoleWriter.println(clientMessage);
                 queue.offerLast(clientMessage);
             }
         } catch (IOException e) {

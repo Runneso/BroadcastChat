@@ -1,7 +1,9 @@
 package chat.balancer;
 
 import chat.common.exceptions.NoALiveServers;
+import chat.common.message.BalancerMessage;
 import chat.common.message.ServerInfo;
+import chat.common.utils.Connection;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,12 +11,15 @@ import java.io.OutputStream;
 import java.net.*;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 public class Balancer implements AutoCloseable {
     private static final int CLIENT_BACKLOG = 128;
@@ -37,10 +42,11 @@ public class Balancer implements AutoCloseable {
     private final PickStrategy strategy = new RoundRobinStrategy(aliveServers);
 
     private final Set<InetSocketAddress> desiredServers = ConcurrentHashMap.newKeySet();
+    private final Map<InetSocketAddress, ServerInfo> infoByAddr = new ConcurrentHashMap<>();
 
-    private final ConcurrentMap<InetSocketAddress, CopyOnWriteArraySet<Socket>> upstreamsByServer = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Socket, Socket> clientToUpstream = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Socket, Socket> upstreamToClient = new ConcurrentHashMap<>();
+    private final Map<InetSocketAddress, CopyOnWriteArraySet<Socket>> upstreamsByServer = new ConcurrentHashMap<>();
+    private final Map<Socket, Socket> clientToUpstream = new ConcurrentHashMap<>();
+    private final Map<Socket, Socket> upstreamToClient = new ConcurrentHashMap<>();
 
     public Balancer(Path configPath, int port) throws IOException {
         this.configPath = configPath;
@@ -52,6 +58,7 @@ public class Balancer implements AutoCloseable {
     public void start() {
         reloadConfig();
         runHealthcheck();
+        sendServerListUpdate();
 
         scheduler.scheduleAtFixedRate(this::runHealthcheckSafe, 0, HEALTHCHECK_PERIOD_SEC, TimeUnit.SECONDS);
         scheduler.scheduleAtFixedRate(this::reloadConfigSafe, RELOAD_PERIOD_SEC, RELOAD_PERIOD_SEC, TimeUnit.SECONDS);
@@ -128,14 +135,18 @@ public class Balancer implements AutoCloseable {
     }
 
     private void runHealthcheckSafe() {
-        try { runHealthcheck();
+        try {
+            runHealthcheck();
+            sendServerListUpdate();
         } catch (Exception e) {
             System.err.println("Healthcheck error: " + e.getMessage());
         }
     }
 
     private void reloadConfigSafe() {
-        try { reloadConfig();
+        try {
+            reloadConfig();
+            sendServerListUpdate();
         } catch (Exception e) {
             System.err.println("Config reload error: " + e.getMessage());
         }
@@ -163,8 +174,12 @@ public class Balancer implements AutoCloseable {
             ConfigReader reader = new ConfigReader(configPath);
             Set<ServerInfo> servers = reader.run();
             Set<InetSocketAddress> next = new HashSet<>();
+            Map<InetSocketAddress, ServerInfo> map = new HashMap<>();
             for (ServerInfo si : servers) {
-                next.add(new InetSocketAddress(si.host(), si.port()));
+                String dialHost = normalizeHost(si.host());
+                InetSocketAddress a = new InetSocketAddress(dialHost, si.port());
+                next.add(a);
+                map.put(a, si);
             }
 
             Set<InetSocketAddress> prevDesired = new HashSet<>(desiredServers);
@@ -175,6 +190,8 @@ public class Balancer implements AutoCloseable {
 
             desiredServers.clear();
             desiredServers.addAll(next);
+            infoByAddr.clear();
+            infoByAddr.putAll(map);
 
             List<InetSocketAddress> currentAlive = aliveServers.get();
             List<InetSocketAddress> updatedAlive = new ArrayList<>();
@@ -199,6 +216,36 @@ public class Balancer implements AutoCloseable {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read config: " + e.getMessage(), e);
         }
+    }
+
+    private void sendServerListUpdate() {
+        List<InetSocketAddress> alive = aliveServers.get();
+        if (alive.isEmpty()) return;
+        List<ServerInfo> list = alive.stream()
+                .map(infoByAddr::get)
+                .filter(s -> s != null)
+                .map(s -> new ServerInfo(s.serverId(), normalizeHost(s.host()), s.port()))
+                .collect(Collectors.toList());
+        if (list.isEmpty()) return;
+        BalancerMessage bm = new BalancerMessage(list);
+        String json = bm.toJsonString();
+        for (InetSocketAddress addr : new HashSet<>(desiredServers)) {
+            try (Socket s = new Socket()) {
+                s.setTcpNoDelay(true);
+                s.connect(addr, CONNECT_TIMEOUT_MS);
+                try (Connection c = Connection.of(s)) {
+                    c.writeLine(json);
+                }
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static String normalizeHost(String host) {
+        if (host == null) return null;
+        String h = host.trim();
+        if ("0.0.0.0".equals(h) || "::".equals(h) || "::0".equals(h)) return "127.0.0.1";
+        return h;
     }
 
     private static void closeQuietly(Socket s) {
