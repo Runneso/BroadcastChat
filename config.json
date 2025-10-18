@@ -1,0 +1,7 @@
+{
+  "servers": [
+    {"serverId":"A","host":"127.0.0.1","port":9001},
+    {"serverId":"B","host":"127.0.0.1","port":9002},
+    {"serverId":"C","host":"127.0.0.1","port":9003}
+  ]
+}
